@@ -38,3 +38,12 @@ tmp/
 # Backup files
 *.bak
 *.backup
+# Dependencies
+node_modules/
+
+# Build output
+target/
+.next/
+out/
+dist/
+build/
