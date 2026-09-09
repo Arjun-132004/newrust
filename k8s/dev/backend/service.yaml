@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: newrust-backend
+  namespace: storefront-dev002
+  labels:
+    app.kubernetes.io/name: newrust-backend
+    app.kubernetes.io/managed-by: deepagent
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: newrust-backend
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

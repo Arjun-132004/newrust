@@ -34,16 +34,16 @@ jobs:
         uses: azure/setup-kubectl@v4
 
       - name: Configure cluster access (keyless)
-        run: aws eks update-kubeconfig --name "t5-dev" --region us-east-1
+        run: aws eks update-kubeconfig --name "storefrontdev002-dev" --region us-east-1
 
-      - name: Ensure namespace storefront-dev777 is Active (auto-heal if stuck Terminating)
+      - name: Ensure namespace storefront-dev002 is Active (auto-heal if stuck Terminating)
         # Three-stage self-heal — see cicd-pipeline.ts for the full rationale.
         # Stage 1: wait 60s for natural termination.
         # Stage 2: force-clear finalizers on Services + PVCs, wait 30s.
         # Stage 3: nuke the namespace's own finalizer via /finalize subresource.
         run: |
           set -eu
-          NS="storefront-dev777"
+          NS="storefront-dev002"
           ns_phase() { kubectl get namespace "$NS" -o jsonpath='{.status.phase}' 2>/dev/null || echo ""; }
           for i in $(seq 1 30); do
             p=$(ns_phase)
@@ -123,7 +123,7 @@ jobs:
         # repos whose manifests are still split across multiple files.
         run: |
           if [ -f "k8s/dev/backend/manifest.yaml" ]; then
-            kubectl apply -n storefront-dev777 -f "k8s/dev/backend/manifest.yaml"
+            kubectl apply -n storefront-dev002 -f "k8s/dev/backend/manifest.yaml"
           else
             # YAML ONLY. This same directory also holds facts.json (the
             # Deployment Facts written beside the manifest for caching and for
@@ -140,7 +140,7 @@ jobs:
               echo "No YAML manifests found in k8s/dev/backend/" >&2
               exit 1
             fi
-            kubectl apply -n storefront-dev777 "$@"
+            kubectl apply -n storefront-dev002 "$@"
           fi
 
       - name: Restart backend rollout (manual dispatch — image tag unchanged)
@@ -151,11 +151,11 @@ jobs:
         # dispatch re-applies the same `:latest` tag and needs a forced restart
         # to pull whatever that tag now points at.
         if: ${{ github.event_name != 'workflow_run' }}
-        run: kubectl rollout restart deployment/newrust-backend -n storefront-dev777
+        run: kubectl rollout restart deployment/newrust-backend -n storefront-dev002
 
       - name: Wait for backend rollout
         id: wait_backend
-        run: kubectl rollout status deployment/newrust-backend -n storefront-dev777 --timeout=360s
+        run: kubectl rollout status deployment/newrust-backend -n storefront-dev002 --timeout=360s
 
       - name: Diagnose backend on failed rollout
         # Runs BEFORE rollback so the job log preserves what actually went wrong
@@ -166,16 +166,16 @@ jobs:
         continue-on-error: true
         run: |
           echo "::group::pods"
-          kubectl get pods -n storefront-dev777 -l app.kubernetes.io/name=newrust-backend -o wide || true
+          kubectl get pods -n storefront-dev002 -l app.kubernetes.io/name=newrust-backend -o wide || true
           echo "::endgroup::"
           echo "::group::describe"
-          kubectl describe pods -n storefront-dev777 -l app.kubernetes.io/name=newrust-backend | tail -n 60 || true
+          kubectl describe pods -n storefront-dev002 -l app.kubernetes.io/name=newrust-backend | tail -n 60 || true
           echo "::endgroup::"
           echo "::group::logs"
-          kubectl logs -n storefront-dev777 -l app.kubernetes.io/name=newrust-backend --tail=100 --all-containers=true --prefix=true || true
+          kubectl logs -n storefront-dev002 -l app.kubernetes.io/name=newrust-backend --tail=100 --all-containers=true --prefix=true || true
           echo "::endgroup::"
           echo "::group::events"
-          kubectl get events -n storefront-dev777 --sort-by=.lastTimestamp | tail -n 30 || true
+          kubectl get events -n storefront-dev002 --sort-by=.lastTimestamp | tail -n 30 || true
           echo "::endgroup::"
           echo "::group::deployment facts (from facts.json, committed at discovery time)"
           FACTS_FILE=$(ls -1 k8s/*/backend/facts.json k8s/*/facts.json 2>/dev/null | head -n 1 || true)
@@ -187,10 +187,10 @@ jobs:
           fi
           echo "::endgroup::"
           echo "::group::port-mismatch check"
-          POD=$(kubectl get pods -n storefront-dev777 -l app.kubernetes.io/name=newrust-backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          POD=$(kubectl get pods -n storefront-dev002 -l app.kubernetes.io/name=newrust-backend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
           if [ -n "$POD" ]; then
-            PROBE_PORT=$(kubectl get pod -n storefront-dev777 "$POD" -o jsonpath='{.spec.containers[0].ports[0].containerPort}' 2>/dev/null || echo "")
-            LISTENING=$(kubectl exec -n storefront-dev777 "$POD" -- sh -c '
+            PROBE_PORT=$(kubectl get pod -n storefront-dev002 "$POD" -o jsonpath='{.spec.containers[0].ports[0].containerPort}' 2>/dev/null || echo "")
+            LISTENING=$(kubectl exec -n storefront-dev002 "$POD" -- sh -c '
               for f in /proc/net/tcp /proc/net/tcp6; do
                 [ -r "$f" ] || continue
                 awk "NR>1 && \$4==\"0A\" { split(\$2,a,\":\"); print strtonum(\"0x\" a[2]) }" "$f"
@@ -217,14 +217,14 @@ jobs:
         # the pipeline recognised a first-deploy vs. an actual failure.
         if: ${{ always() && (steps.pin_backend.outcome == 'failure' || steps.apply_backend.outcome == 'failure' || steps.restart_backend.outcome == 'failure' || steps.wait_backend.outcome == 'failure') }}
         run: |
-          REVS=$(kubectl rollout history deployment/newrust-backend -n storefront-dev777 2>/dev/null | tail -n +3 | grep -c '^' || echo 0)
+          REVS=$(kubectl rollout history deployment/newrust-backend -n storefront-dev002 2>/dev/null | tail -n +3 | grep -c '^' || echo 0)
           if [ "$REVS" -lt 2 ]; then
             echo "::warning::Rollout of newrust-backend failed and this is the first-ever deploy (rollout history has $REVS revision). Nothing to roll back to — leaving the failed pods in place so you can debug them."
             exit 1
           fi
           echo "::warning::Rollout of newrust-backend failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/newrust-backend -n storefront-dev777
-          kubectl rollout status deployment/newrust-backend -n storefront-dev777 --timeout=240s
+          kubectl rollout undo deployment/newrust-backend -n storefront-dev002
+          kubectl rollout status deployment/newrust-backend -n storefront-dev002 --timeout=240s
 
       - name: Pin frontend manifests to the built commit
         id: pin_frontend
@@ -264,7 +264,7 @@ jobs:
         # repos whose manifests are still split across multiple files.
         run: |
           if [ -f "k8s/dev/frontend/manifest.yaml" ]; then
-            kubectl apply -n storefront-dev777 -f "k8s/dev/frontend/manifest.yaml"
+            kubectl apply -n storefront-dev002 -f "k8s/dev/frontend/manifest.yaml"
           else
             # YAML ONLY. This same directory also holds facts.json (the
             # Deployment Facts written beside the manifest for caching and for
@@ -281,7 +281,7 @@ jobs:
               echo "No YAML manifests found in k8s/dev/frontend/" >&2
               exit 1
             fi
-            kubectl apply -n storefront-dev777 "$@"
+            kubectl apply -n storefront-dev002 "$@"
           fi
 
       - name: Restart frontend rollout (manual dispatch — image tag unchanged)
@@ -292,11 +292,11 @@ jobs:
         # dispatch re-applies the same `:latest` tag and needs a forced restart
         # to pull whatever that tag now points at.
         if: ${{ github.event_name != 'workflow_run' }}
-        run: kubectl rollout restart deployment/newrust-frontend -n storefront-dev777
+        run: kubectl rollout restart deployment/newrust-frontend -n storefront-dev002
 
       - name: Wait for frontend rollout
         id: wait_frontend
-        run: kubectl rollout status deployment/newrust-frontend -n storefront-dev777 --timeout=360s
+        run: kubectl rollout status deployment/newrust-frontend -n storefront-dev002 --timeout=360s
 
       - name: Diagnose frontend on failed rollout
         # Runs BEFORE rollback so the job log preserves what actually went wrong
@@ -307,16 +307,16 @@ jobs:
         continue-on-error: true
         run: |
           echo "::group::pods"
-          kubectl get pods -n storefront-dev777 -l app.kubernetes.io/name=newrust-frontend -o wide || true
+          kubectl get pods -n storefront-dev002 -l app.kubernetes.io/name=newrust-frontend -o wide || true
           echo "::endgroup::"
           echo "::group::describe"
-          kubectl describe pods -n storefront-dev777 -l app.kubernetes.io/name=newrust-frontend | tail -n 60 || true
+          kubectl describe pods -n storefront-dev002 -l app.kubernetes.io/name=newrust-frontend | tail -n 60 || true
           echo "::endgroup::"
           echo "::group::logs"
-          kubectl logs -n storefront-dev777 -l app.kubernetes.io/name=newrust-frontend --tail=100 --all-containers=true --prefix=true || true
+          kubectl logs -n storefront-dev002 -l app.kubernetes.io/name=newrust-frontend --tail=100 --all-containers=true --prefix=true || true
           echo "::endgroup::"
           echo "::group::events"
-          kubectl get events -n storefront-dev777 --sort-by=.lastTimestamp | tail -n 30 || true
+          kubectl get events -n storefront-dev002 --sort-by=.lastTimestamp | tail -n 30 || true
           echo "::endgroup::"
           echo "::group::deployment facts (from facts.json, committed at discovery time)"
           FACTS_FILE=$(ls -1 k8s/*/frontend/facts.json k8s/*/facts.json 2>/dev/null | head -n 1 || true)
@@ -328,10 +328,10 @@ jobs:
           fi
           echo "::endgroup::"
           echo "::group::port-mismatch check"
-          POD=$(kubectl get pods -n storefront-dev777 -l app.kubernetes.io/name=newrust-frontend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+          POD=$(kubectl get pods -n storefront-dev002 -l app.kubernetes.io/name=newrust-frontend -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
           if [ -n "$POD" ]; then
-            PROBE_PORT=$(kubectl get pod -n storefront-dev777 "$POD" -o jsonpath='{.spec.containers[0].ports[0].containerPort}' 2>/dev/null || echo "")
-            LISTENING=$(kubectl exec -n storefront-dev777 "$POD" -- sh -c '
+            PROBE_PORT=$(kubectl get pod -n storefront-dev002 "$POD" -o jsonpath='{.spec.containers[0].ports[0].containerPort}' 2>/dev/null || echo "")
+            LISTENING=$(kubectl exec -n storefront-dev002 "$POD" -- sh -c '
               for f in /proc/net/tcp /proc/net/tcp6; do
                 [ -r "$f" ] || continue
                 awk "NR>1 && \$4==\"0A\" { split(\$2,a,\":\"); print strtonum(\"0x\" a[2]) }" "$f"
@@ -358,11 +358,11 @@ jobs:
         # the pipeline recognised a first-deploy vs. an actual failure.
         if: ${{ always() && (steps.pin_frontend.outcome == 'failure' || steps.apply_frontend.outcome == 'failure' || steps.restart_frontend.outcome == 'failure' || steps.wait_frontend.outcome == 'failure') }}
         run: |
-          REVS=$(kubectl rollout history deployment/newrust-frontend -n storefront-dev777 2>/dev/null | tail -n +3 | grep -c '^' || echo 0)
+          REVS=$(kubectl rollout history deployment/newrust-frontend -n storefront-dev002 2>/dev/null | tail -n +3 | grep -c '^' || echo 0)
           if [ "$REVS" -lt 2 ]; then
             echo "::warning::Rollout of newrust-frontend failed and this is the first-ever deploy (rollout history has $REVS revision). Nothing to roll back to — leaving the failed pods in place so you can debug them."
             exit 1
           fi
           echo "::warning::Rollout of newrust-frontend failed its health check — rolling back to the previous revision."
-          kubectl rollout undo deployment/newrust-frontend -n storefront-dev777
-          kubectl rollout status deployment/newrust-frontend -n storefront-dev777 --timeout=240s
+          kubectl rollout undo deployment/newrust-frontend -n storefront-dev002
+          kubectl rollout status deployment/newrust-frontend -n storefront-dev002 --timeout=240s
